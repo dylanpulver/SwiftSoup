@@ -278,6 +278,20 @@ open class Document: Element {
         return Array(getOutputSettings().prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
 
+    @inline(__always)
+    open func outerHtmlUTF8FromCurrentTree() throws -> [UInt8] {
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(estimatedDocumentOuterHtmlCapacity())
+        let outputSettings = getOutputSettings()
+        for node in childNodes {
+            bytes.append(contentsOf: try node.outerHtmlUTF8Internal(outputSettings, allowRawSource: false))
+        }
+        if outputSettings.prettyPrint() {
+            return bytes.trim()
+        }
+        return bytes
+    }
+
     /**
      Set the text of the `body` of this document. Any existing nodes within the body will be cleared.
      - parameter text: unencoded text
