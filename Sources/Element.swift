@@ -2750,6 +2750,20 @@ open class Element: Node {
         try html2(accum)
         return Array(getOutputSettings().prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
+
+    @inline(__always)
+    public func htmlUTF8FromCurrentTree() throws -> [UInt8] {
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(estimatedOuterHtmlCapacity())
+        let outputSettings = getOutputSettings()
+        for node in childNodes {
+            bytes.append(contentsOf: try node.outerHtmlUTF8Internal(outputSettings, allowRawSource: false))
+        }
+        if outputSettings.prettyPrint() {
+            return bytes.trim()
+        }
+        return bytes
+    }
     
     @inline(__always)
     private func html2(_ accum: StringBuilder) throws {

@@ -287,6 +287,95 @@ open class Document: Element {
             bytes.append(contentsOf: try node.outerHtmlUTF8Internal(outputSettings, allowRawSource: false))
         }
         if outputSettings.prettyPrint() {
+            return Array(bytes.trim())
+        }
+        return bytes
+    }
+
+    @inline(__always)
+    open func outerHtmlUTF8FromCurrentTreeSplicingBody() throws -> [UInt8] {
+        try outerHtmlUTF8FromCurrentTree(splicingBodyBytes: nil)
+    }
+
+    @inline(__always)
+    open func outerHtmlUTF8FromCurrentTree(splicingBodyBytes providedBodyBytes: [UInt8]?) throws -> [UInt8] {
+        var htmlElementIndex: Int?
+        for index in childNodes.indices {
+            guard let element = childNodes[index] as? Element,
+                  element.tagNameUTF8() == UTF8Arrays.html else {
+                continue
+            }
+            guard htmlElementIndex == nil else {
+                return try outerHtmlUTF8FromCurrentTree()
+            }
+            htmlElementIndex = index
+        }
+        guard let htmlElementIndex,
+              let htmlElement = childNodes[htmlElementIndex] as? Element else {
+            return try outerHtmlUTF8FromCurrentTree()
+        }
+        let htmlChildren = htmlElement.getChildNodes()
+        var bodyElementIndex: Int?
+        for index in htmlChildren.indices {
+            guard let element = htmlChildren[index] as? Element,
+                  element.tagNameUTF8() == UTF8Arrays.body else {
+                continue
+            }
+            guard bodyElementIndex == nil else {
+                return try outerHtmlUTF8FromCurrentTree()
+            }
+            bodyElementIndex = index
+        }
+        guard let bodyElementIndex,
+              let bodyElement = htmlChildren[bodyElementIndex] as? Element else {
+            return try outerHtmlUTF8FromCurrentTree()
+        }
+
+        let bodyBytes: [UInt8]
+        if let providedBodyBytes {
+            bodyBytes = providedBodyBytes
+        } else if bodyElement.getChildNodes().count == 1,
+                  let rawBody = bodyElement.getChildNodes().first as? DataNode {
+            bodyBytes = rawBody.getWholeDataUTF8()
+        } else {
+            bodyBytes = try bodyElement.htmlUTF8FromCurrentTree()
+        }
+
+        let outputSettings = getOutputSettings()
+        func renderedBytes(_ render: (StringBuilder) throws -> Void) rethrows -> [UInt8] {
+            let accum = StringBuilder.acquire(512)
+            defer { StringBuilder.release(accum) }
+            try render(accum)
+            return Array(accum.buffer)
+        }
+
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(estimatedDocumentOuterHtmlCapacity() + bodyBytes.count)
+        for index in childNodes.indices {
+            let node = childNodes[index]
+            guard index == htmlElementIndex else {
+                bytes.append(contentsOf: try renderedBytes {
+                    try node.outerHtmlFastCurrentTree($0, 0, outputSettings)
+                })
+                continue
+            }
+            bytes.append(contentsOf: try renderedBytes {
+                try htmlElement.outerHtmlHead($0, 0, outputSettings)
+                for childIndex in htmlChildren.indices where childIndex < bodyElementIndex {
+                    try htmlChildren[childIndex].outerHtmlFastCurrentTree($0, 1, outputSettings)
+                }
+                try bodyElement.outerHtmlHead($0, 1, outputSettings)
+            })
+            bytes.append(contentsOf: bodyBytes)
+            bytes.append(contentsOf: try renderedBytes {
+                try bodyElement.outerHtmlTail($0, 1, outputSettings)
+                for childIndex in htmlChildren.indices where childIndex > bodyElementIndex {
+                    try htmlChildren[childIndex].outerHtmlFastCurrentTree($0, 1, outputSettings)
+                }
+                try htmlElement.outerHtmlTail($0, 0, outputSettings)
+            })
+        }
+        if outputSettings.prettyPrint() {
             return bytes.trim()
         }
         return bytes
