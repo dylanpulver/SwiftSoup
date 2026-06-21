@@ -1087,7 +1087,7 @@ open class Node: Equatable, Hashable {
     }
 
     @inline(__always)
-    private func outerHtmlFast(_ accum: StringBuilder, _ depth: Int, _ out: OutputSettings, allowRawSource: Bool) throws {
+    internal func outerHtmlFast(_ accum: StringBuilder, _ depth: Int, _ out: OutputSettings, allowRawSource: Bool) throws {
         if let raw = rawSourceSlice(out, allowRawSource: allowRawSource) {
             accum.append(raw)
             return

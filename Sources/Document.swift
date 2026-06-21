@@ -355,14 +355,14 @@ open class Document: Element {
             let node = childNodes[index]
             guard index == htmlElementIndex else {
                 bytes.append(contentsOf: try renderedBytes {
-                    try node.outerHtmlFastCurrentTree($0, 0, outputSettings)
+                    try node.outerHtmlFast($0, 0, outputSettings, allowRawSource: true)
                 })
                 continue
             }
             bytes.append(contentsOf: try renderedBytes {
                 try htmlElement.outerHtmlHead($0, 0, outputSettings)
                 for childIndex in htmlChildren.indices where childIndex < bodyElementIndex {
-                    try htmlChildren[childIndex].outerHtmlFastCurrentTree($0, 1, outputSettings)
+                    try htmlChildren[childIndex].outerHtmlFast($0, 1, outputSettings, allowRawSource: true)
                 }
                 try bodyElement.outerHtmlHead($0, 1, outputSettings)
             })
@@ -370,7 +370,7 @@ open class Document: Element {
             bytes.append(contentsOf: try renderedBytes {
                 try bodyElement.outerHtmlTail($0, 1, outputSettings)
                 for childIndex in htmlChildren.indices where childIndex > bodyElementIndex {
-                    try htmlChildren[childIndex].outerHtmlFastCurrentTree($0, 1, outputSettings)
+                    try htmlChildren[childIndex].outerHtmlFast($0, 1, outputSettings, allowRawSource: true)
                 }
                 try htmlElement.outerHtmlTail($0, 0, outputSettings)
             })
