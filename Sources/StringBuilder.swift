@@ -440,7 +440,9 @@ open class StringBuilder {
             if count == 0 { return true }
             let newSize = size + count
             if size == internalBuffer.count {
-                internalBuffer.append(contentsOf: buffer)
+                if let base = buffer.baseAddress {
+                    internalBuffer.append(contentsOf: UnsafeBufferPointer(start: base, count: count))
+                }
                 size = newSize
                 return true
             }
@@ -483,7 +485,10 @@ open class StringBuilder {
             if count == 0 { return }
             let newSize = size + count
             if size == internalBuffer.count {
-                internalBuffer.append(contentsOf: bytes)
+                bytes.withUnsafeBufferPointer { src in
+                    guard let base = src.baseAddress else { return }
+                    internalBuffer.append(contentsOf: UnsafeBufferPointer(start: base, count: count))
+                }
                 size = newSize
                 return
             }
@@ -522,7 +527,10 @@ open class StringBuilder {
             if count == 0 { return }
             let newSize = size + count
             if size == internalBuffer.count {
-                internalBuffer.append(contentsOf: bytes)
+                bytes.withUnsafeBufferPointer { src in
+                    guard let base = src.baseAddress else { return }
+                    internalBuffer.append(contentsOf: UnsafeBufferPointer(start: base, count: count))
+                }
                 size = newSize
                 return
             }
