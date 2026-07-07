@@ -1985,9 +1985,6 @@ open class Element: Node {
         }
     }
     
-    #if compiler(>=6.4)
-    @_optimize(none) // works around swiftlang/swift#90408 (optimizer crash at -O, Swift 6.4+/main)
-    #endif
     private static func appendNormalisedText(_ accum: StringBuilder, _ textNode: TextNode) {
         let text = textNode.wholeTextSlice()
         if Element.preserveWhitespace(textNode.parentNode) {
