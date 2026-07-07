@@ -502,7 +502,15 @@ open class StringBuilder {
                     }
                 }
                 if count > available {
-                    internalBuffer.append(contentsOf: bytes[bytes.index(bytes.startIndex, offsetBy: available)...])
+                    bytes.withUnsafeBufferPointer { src in
+                        guard let srcBase = src.baseAddress else { return }
+                        internalBuffer.append(
+                            contentsOf: UnsafeBufferPointer(
+                                start: srcBase.advanced(by: available),
+                                count: count - available
+                            )
+                        )
+                    }
                 }
                 size = newSize
                 return
@@ -544,7 +552,15 @@ open class StringBuilder {
                     }
                 }
                 if count > available {
-                    internalBuffer.append(contentsOf: bytes[bytes.index(bytes.startIndex, offsetBy: available)...])
+                    bytes.withUnsafeBufferPointer { src in
+                        guard let srcBase = src.baseAddress else { return }
+                        internalBuffer.append(
+                            contentsOf: UnsafeBufferPointer(
+                                start: srcBase.advanced(by: available),
+                                count: count - available
+                            )
+                        )
+                    }
                 }
                 size = newSize
                 return
