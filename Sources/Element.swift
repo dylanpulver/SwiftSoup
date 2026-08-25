@@ -2736,13 +2736,11 @@ open class Element: Node {
         return String(decoding: accum.buffer, as: UTF8.self)
     }
     
-    /**
-     Retrieves the element's inner HTML. E.g. on a `<div>` with one empty `<p>`, would return
-     `<p></p>`. (Whereas ``Node/outerHtml()`` would return `<div><p></p></div>`.)
-     
-     - returns: String of HTML.
-     - seealso: ``Node/outerHtml()``
-     */
+    /// Retrieves this element's inner HTML as UTF-8 bytes.
+    ///
+    /// This is the recommended UTF-8 serializer for almost all callers. It uses
+    /// SwiftSoup's normal source-reuse behavior and rebuilds modified nodes as needed.
+    /// For a `<div>` containing one empty `<p>`, this returns `<p></p>`.
     @inline(__always)
     public func htmlUTF8() throws -> [UInt8] {
         let accum = StringBuilder.acquire(estimatedOuterHtmlCapacity())
@@ -2751,14 +2749,20 @@ open class Element: Node {
         return Array(getOutputSettings().prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
 
-    /// Serializes this element's current children without reusing source-backed slices.
+    // MARK: - Advanced serialization performance tuning
+
+    /// Serializes this element's children without reusing parsed source text.
+    ///
+    /// This is an advanced performance-tuning API. Most callers should use
+    /// ``htmlUTF8()``; disable source reuse only after benchmarking a workload
+    /// with dense mutations.
     @inline(__always)
-    public func htmlUTF8FromCurrentTree() throws -> [UInt8] {
+    public func htmlUTF8WithoutSourceReuse() throws -> [UInt8] {
         let accum = StringBuilder.acquire(estimatedOuterHtmlCapacity())
         defer { StringBuilder.release(accum) }
         let outputSettings = getOutputSettings()
         for node in childNodes {
-            try node.outerHtmlFastCurrentTree(accum, 0, outputSettings)
+            try node.outerHtmlFastWithoutSourceReuse(accum, 0, outputSettings)
         }
         return Array(outputSettings.prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }

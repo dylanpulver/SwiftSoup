@@ -1102,11 +1102,15 @@ open class Node: Equatable, Hashable {
     }
 
     @inline(__always)
-    internal func outerHtmlFastCurrentTree(_ accum: StringBuilder, _ depth: Int, _ out: OutputSettings) throws {
+    internal func outerHtmlFastWithoutSourceReuse(
+        _ accum: StringBuilder,
+        _ depth: Int,
+        _ out: OutputSettings
+    ) throws {
         try outerHtmlHead(accum, depth, out)
         if !childNodes.isEmpty {
             for child in childNodes {
-                try child.outerHtmlFastCurrentTree(accum, depth + 1, out)
+                try child.outerHtmlFastWithoutSourceReuse(accum, depth + 1, out)
             }
         }
         try outerHtmlTail(accum, depth, out)

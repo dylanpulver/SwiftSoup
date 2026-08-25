@@ -265,6 +265,12 @@ open class Document: Element {
         return max(1024, estimated)
     }
 
+    /// Serializes this document to UTF-8 using SwiftSoup's normal source-reuse behavior.
+    ///
+    /// This is the recommended serializer for almost all callers. It automatically
+    /// preserves eligible parsed source text and rebuilds modified nodes as needed.
+    /// The source-reuse variants below are specialized performance-tuning tools for
+    /// measured dense-mutation workloads.
     @inline(__always)
     open func outerHtmlUTF8() throws -> [UInt8] {
         if let patched = try patchedOuterHtmlUTF8() {
@@ -278,56 +284,70 @@ open class Document: Element {
         return Array(getOutputSettings().prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
 
-    /// Serializes the DOM as it exists now without reusing source-backed node slices.
+    // MARK: - Advanced serialization performance tuning
+
+    /// Serializes without reusing any parsed source text.
     ///
-    /// This can outperform source patching after dense mutations and produces a
-    /// normalized representation of the current tree. For clean or sparsely
-    /// modified documents, prefer ``outerHtmlUTF8()``.
+    /// This is an advanced performance-tuning API. Most callers should use
+    /// ``outerHtmlUTF8()``. Disabling source reuse can be faster after dense
+    /// mutations, but is usually slower for clean or sparsely modified documents.
+    /// Benchmark your representative workload before using it.
+    ///
+    /// Because every node is serialized again, the output is normalized according
+    /// to the document's output settings instead of preserving source formatting.
     @inline(__always)
-    open func outerHtmlUTF8FromCurrentTree() throws -> [UInt8] {
+    open func outerHtmlUTF8WithoutSourceReuse() throws -> [UInt8] {
         let accum = StringBuilder.acquire(estimatedDocumentOuterHtmlCapacity())
         defer { StringBuilder.release(accum) }
         let outputSettings = getOutputSettings()
         for node in childNodes {
-            try node.outerHtmlFastCurrentTree(accum, 0, outputSettings)
+            try node.outerHtmlFastWithoutSourceReuse(accum, 0, outputSettings)
         }
         return Array(outputSettings.prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
 
-    /// Serializes the current body tree while reusing source text for unchanged
-    /// nodes outside the body.
+    /// Serializes the body without source reuse while allowing unchanged nodes
+    /// outside the body to reuse parsed source text.
     ///
-    /// Use this for HTML documents whose body has been densely modified while
-    /// the surrounding document shell remains mostly unchanged. If the document
-    /// does not have exactly one top-level `html` element containing exactly one
-    /// `body` element, this safely falls back to ``outerHtmlUTF8FromCurrentTree()``.
+    /// This is an advanced performance-tuning API for HTML documents with dense
+    /// body mutations and a mostly unchanged document shell. Most callers should
+    /// use ``outerHtmlUTF8()``. Benchmark your representative workload before
+    /// choosing this policy.
+    ///
+    /// If the document does not have exactly one top-level `html` element containing
+    /// exactly one `body` element, this safely falls back to
+    /// ``outerHtmlUTF8WithoutSourceReuse()``.
     @inline(__always)
-    open func outerHtmlUTF8FromCurrentBodyTree() throws -> [UInt8] {
+    open func outerHtmlUTF8ReusingSourceOutsideBody() throws -> [UInt8] {
         guard let body = uniqueHTMLBody() else {
-            return try outerHtmlUTF8FromCurrentTree()
+            return try outerHtmlUTF8WithoutSourceReuse()
         }
-        return try outerHtmlUTF8PreservingSourceOutsideBody(body, contents: .currentTree)
+        return try outerHtmlUTF8ReusingSourceOutsideBody(body, contents: .serializeBodyTree)
     }
 
-    /// Serializes the document with the supplied UTF-8 bytes as its body contents,
-    /// while reusing source text for unchanged nodes outside the body.
+    /// Inserts already-serialized UTF-8 body contents while allowing unchanged
+    /// nodes outside the body to reuse parsed source text.
     ///
-    /// The bytes are inserted as raw inner HTML; they are not parsed or escaped.
-    /// The document must have exactly one top-level `html` element containing
-    /// exactly one `body` element.
+    /// This is a specialized performance-tuning API for callers that already have
+    /// the final body bytes. Most callers should use ``outerHtmlUTF8()`` instead.
+    /// The supplied bytes are raw inner HTML; they are not parsed or escaped. The
+    /// document must have exactly one top-level `html` element containing exactly
+    /// one `body` element.
     @inline(__always)
-    open func outerHtmlUTF8ReplacingBodyContents(with bodyInnerHTMLUTF8: [UInt8]) throws -> [UInt8] {
+    open func outerHtmlUTF8ReusingSourceOutsideBody(
+        preSerializedBodyContents bodyInnerHTMLUTF8: [UInt8]
+    ) throws -> [UInt8] {
         guard let body = uniqueHTMLBody() else {
             throw Exception.Error(
                 type: .IllegalArgumentException,
                 Message: "Replacing body contents requires one unambiguous html/body structure"
             )
         }
-        return try outerHtmlUTF8PreservingSourceOutsideBody(body, contents: .serialized(bodyInnerHTMLUTF8))
+        return try outerHtmlUTF8ReusingSourceOutsideBody(body, contents: .serialized(bodyInnerHTMLUTF8))
     }
 
     private enum BodyContentsForSerialization {
-        case currentTree
+        case serializeBodyTree
         case serialized([UInt8])
     }
 
@@ -373,7 +393,7 @@ open class Document: Element {
         )
     }
 
-    private func outerHtmlUTF8PreservingSourceOutsideBody(
+    private func outerHtmlUTF8ReusingSourceOutsideBody(
         _ location: UniqueHTMLBody,
         contents bodyContents: BodyContentsForSerialization
     ) throws -> [UInt8] {
@@ -381,7 +401,7 @@ open class Document: Element {
         let outputSettings = getOutputSettings()
         let replacementByteCount: Int
         switch bodyContents {
-        case .currentTree:
+        case .serializeBodyTree:
             replacementByteCount = 0
         case .serialized(let bytes):
             replacementByteCount = bytes.count
@@ -411,13 +431,13 @@ open class Document: Element {
             switch bodyContents {
             case .serialized(let bytes):
                 accum.append(bytes)
-            case .currentTree:
+            case .serializeBodyTree:
                 let bodyChildren = location.body.getChildNodes()
                 if bodyChildren.count == 1, let rawBody = bodyChildren.first as? DataNode {
                     accum.append(rawBody.getWholeDataUTF8())
                 } else {
                     for child in bodyChildren {
-                        try child.outerHtmlFastCurrentTree(accum, 2, outputSettings)
+                        try child.outerHtmlFastWithoutSourceReuse(accum, 2, outputSettings)
                     }
                 }
             }

@@ -1217,17 +1217,17 @@ final class BenchmarkProfileTest: XCTestCase {
 
     private enum SerializationBenchmarkMode: String {
         case sourcePatched = "source-patched"
-        case currentTree = "current-tree"
-        case currentBodyTree = "current-body-tree"
+        case withoutSourceReuse = "without-source-reuse"
+        case reuseSourceOutsideBody = "reuse-source-outside-body"
 
         func serialize(_ document: Document) throws -> [UInt8] {
             switch self {
             case .sourcePatched:
                 return try document.outerHtmlUTF8()
-            case .currentTree:
-                return try document.outerHtmlUTF8FromCurrentTree()
-            case .currentBodyTree:
-                return try document.outerHtmlUTF8FromCurrentBodyTree()
+            case .withoutSourceReuse:
+                return try document.outerHtmlUTF8WithoutSourceReuse()
+            case .reuseSourceOutsideBody:
+                return try document.outerHtmlUTF8ReusingSourceOutsideBody()
             }
         }
     }
