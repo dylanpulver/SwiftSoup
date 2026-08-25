@@ -529,6 +529,7 @@ open class Node: Equatable, Hashable {
     @usableFromInline
     internal func markSourceDirty(force: Bool = false) {
         if sourceRangeDirty {
+            ownerDocument()?.registerDirtySourceRoot(self)
             return
         }
         if !force, treeBuilder?.isBulkBuilding == true {
@@ -543,6 +544,9 @@ open class Node: Equatable, Hashable {
     @usableFromInline
     internal func markSourceDirty(force: Bool = false, registerDirtyRoot: Bool) {
         if sourceRangeDirty {
+            if registerDirtyRoot {
+                ownerDocument()?.registerDirtySourceRoot(self)
+            }
             return
         }
         if !force, treeBuilder?.isBulkBuilding == true {

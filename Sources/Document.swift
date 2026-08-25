@@ -35,10 +35,7 @@ open class Document: Element {
     internal var parsedAsXml: Bool = false
     
     @usableFromInline
-    internal var dirtySourceRootIDs: Set<ObjectIdentifier> = []
-    
-    @usableFromInline
-    internal var dirtySourceRoots: [Weak<Node>] = []
+    internal var dirtySourceRoots: [ObjectIdentifier: Weak<Node>] = [:]
 
 
 
@@ -491,63 +488,55 @@ open class Document: Element {
 
     @usableFromInline
     internal func registerDirtySourceRoot(_ node: Node) {
-        cleanupDirtySourceRoots()
+        let identifier = ObjectIdentifier(node)
+        if let registered = dirtySourceRoots[identifier]?.value,
+           registered === node,
+           registered.sourceRangeDirty {
+            return
+        }
 
         if node === self {
-            dirtySourceRootIDs = [ObjectIdentifier(self)]
-            dirtySourceRoots = [Weak(self)]
+            dirtySourceRoots = [identifier: Weak(self)]
             return
         }
 
         var ancestor = node.parentNode
         while let current = ancestor {
-            if dirtySourceRootIDs.contains(ObjectIdentifier(current)) {
+            let ancestorIdentifier = ObjectIdentifier(current)
+            if let registered = dirtySourceRoots[ancestorIdentifier]?.value,
+               registered === current,
+               registered.sourceRangeDirty {
                 return
             }
             ancestor = current.parentNode
         }
 
-        dirtySourceRoots.removeAll { weakNode in
-            guard let existing = weakNode.value else { return true }
-            if node.isAncestor(of: existing) {
-                dirtySourceRootIDs.remove(ObjectIdentifier(existing))
-                return true
+        cleanupDirtySourceRoots()
+        let descendantIdentifiers = dirtySourceRoots.compactMap { entry -> ObjectIdentifier? in
+            let (identifier, weakNode) = entry
+            guard let existing = weakNode.value,
+                  node.isAncestor(of: existing) else {
+                return nil
             }
-            return false
+            return identifier
         }
-
-        let identifier = ObjectIdentifier(node)
-        if dirtySourceRootIDs.insert(identifier).inserted {
-            dirtySourceRoots.append(Weak(node))
+        for descendantIdentifier in descendantIdentifiers {
+            dirtySourceRoots.removeValue(forKey: descendantIdentifier)
         }
+        dirtySourceRoots[identifier] = Weak(node)
     }
 
     @usableFromInline
     internal func currentDirtySourceRoots() -> [Node] {
         cleanupDirtySourceRoots()
-        return dirtySourceRoots.compactMap { weakNode in
-            guard let node = weakNode.value, node.sourceRangeDirty else { return nil }
-            return node
-        }
+        return dirtySourceRoots.values.compactMap(\.value)
     }
 
     @usableFromInline
     internal func cleanupDirtySourceRoots() {
-        dirtySourceRoots.removeAll { weakNode in
-            guard let node = weakNode.value else { return true }
-            let identifier = ObjectIdentifier(node)
-            guard dirtySourceRootIDs.contains(identifier) else { return true }
-            return false
+        dirtySourceRoots = dirtySourceRoots.filter { _, weakNode in
+            weakNode.value?.sourceRangeDirty == true
         }
-
-        if dirtySourceRoots.isEmpty {
-            dirtySourceRootIDs.removeAll(keepingCapacity: true)
-            return
-        }
-
-        dirtySourceRootIDs = Set(dirtySourceRoots.compactMap { weakNode in
-            weakNode.value.map(ObjectIdentifier.init)
-        })
     }
 
     @usableFromInline
@@ -624,7 +613,6 @@ open class Document: Element {
         clone.updateMetaCharset = updateMetaCharset
         clone.sourceBuffer = nil
         clone.parsedAsXml = parsedAsXml
-        clone.dirtySourceRootIDs.removeAll(keepingCapacity: false)
         clone.dirtySourceRoots.removeAll(keepingCapacity: false)
         return copy(clone: clone, parent: parent, copyChildren: false, rebuildIndexes: false)
     }
@@ -637,7 +625,6 @@ open class Document: Element {
         clone.updateMetaCharset = updateMetaCharset
         clone.sourceBuffer = nil
         clone.parsedAsXml = parsedAsXml
-        clone.dirtySourceRootIDs.removeAll(keepingCapacity: false)
         clone.dirtySourceRoots.removeAll(keepingCapacity: false)
         return super.copy(clone: clone, parent: parent)
     }
