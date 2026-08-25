@@ -294,69 +294,111 @@ open class Document: Element {
         return Array(outputSettings.prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
 
-    /// Serializes the current body while allowing unchanged nodes outside it
-    /// to reuse their source slices.
+    /// Serializes the current body tree while reusing source text for unchanged
+    /// nodes outside the body.
     ///
-    /// This is intended for HTML workloads that densely mutate the body but
-    /// leave the surrounding document shell mostly unchanged.
+    /// Use this for HTML documents whose body has been densely modified while
+    /// the surrounding document shell remains mostly unchanged. If the document
+    /// does not have exactly one top-level `html` element containing exactly one
+    /// `body` element, this safely falls back to ``outerHtmlUTF8FromCurrentTree()``.
     @inline(__always)
-    open func outerHtmlUTF8FromCurrentTreeSplicingBody() throws -> [UInt8] {
-        try outerHtmlUTF8FromCurrentTree(splicingBodyBytes: nil)
+    open func outerHtmlUTF8FromCurrentBodyTree() throws -> [UInt8] {
+        guard let body = uniqueHTMLBody() else {
+            return try outerHtmlUTF8FromCurrentTree()
+        }
+        return try outerHtmlUTF8PreservingSourceOutsideBody(body, contents: .currentTree)
     }
 
-    /// Serializes the document shell and inserts either the current body tree
-    /// or the supplied already-serialized body contents.
+    /// Serializes the document with the supplied UTF-8 bytes as its body contents,
+    /// while reusing source text for unchanged nodes outside the body.
     ///
-    /// The supplied bytes are treated as raw inner HTML and are not parsed or
-    /// escaped. Documents without one unambiguous `html` and `body` element
-    /// fall back to ``outerHtmlUTF8FromCurrentTree()``.
+    /// The bytes are inserted as raw inner HTML; they are not parsed or escaped.
+    /// The document must have exactly one top-level `html` element containing
+    /// exactly one `body` element.
     @inline(__always)
-    open func outerHtmlUTF8FromCurrentTree(splicingBodyBytes providedBodyBytes: [UInt8]?) throws -> [UInt8] {
-        var htmlElementIndex: Int?
-        for index in childNodes.indices {
-            guard let element = childNodes[index] as? Element,
-                  element.tagNameUTF8() == UTF8Arrays.html else {
-                continue
-            }
-            guard htmlElementIndex == nil else {
-                return try outerHtmlUTF8FromCurrentTree()
-            }
-            htmlElementIndex = index
+    open func outerHtmlUTF8ReplacingBodyContents(with bodyInnerHTMLUTF8: [UInt8]) throws -> [UInt8] {
+        guard let body = uniqueHTMLBody() else {
+            throw Exception.Error(
+                type: .IllegalArgumentException,
+                Message: "Replacing body contents requires one unambiguous html/body structure"
+            )
         }
-        guard let htmlElementIndex,
-              let htmlElement = childNodes[htmlElementIndex] as? Element else {
-            return try outerHtmlUTF8FromCurrentTree()
-        }
-        let htmlChildren = htmlElement.getChildNodes()
-        var bodyElementIndex: Int?
-        for index in htmlChildren.indices {
-            guard let element = htmlChildren[index] as? Element,
-                  element.tagNameUTF8() == UTF8Arrays.body else {
-                continue
-            }
-            guard bodyElementIndex == nil else {
-                return try outerHtmlUTF8FromCurrentTree()
-            }
-            bodyElementIndex = index
-        }
-        guard let bodyElementIndex,
-              let bodyElement = htmlChildren[bodyElementIndex] as? Element else {
-            return try outerHtmlUTF8FromCurrentTree()
-        }
-        let bodyChildren = bodyElement.getChildNodes()
+        return try outerHtmlUTF8PreservingSourceOutsideBody(body, contents: .serialized(bodyInnerHTMLUTF8))
+    }
 
+    private enum BodyContentsForSerialization {
+        case currentTree
+        case serialized([UInt8])
+    }
+
+    private struct UniqueHTMLBody {
+        let html: Element
+        let htmlIndex: Int
+        let body: Element
+        let bodyIndex: Int
+    }
+
+    private struct IndexedElement {
+        let element: Element
+        let index: Int
+    }
+
+    private func uniqueDirectElement(named tagName: [UInt8], in nodes: [Node]) -> IndexedElement? {
+        var match: IndexedElement?
+        for (index, node) in nodes.enumerated() {
+            guard let element = node as? Element,
+                  element.tagNameUTF8() == tagName else {
+                continue
+            }
+            guard match == nil else {
+                return nil
+            }
+            match = IndexedElement(element: element, index: index)
+        }
+        return match
+    }
+
+    /// Returns the single body that can be replaced without changing document
+    /// structure. Ambiguous or non-HTML documents deliberately return `nil`.
+    private func uniqueHTMLBody() -> UniqueHTMLBody? {
+        guard let html = uniqueDirectElement(named: UTF8Arrays.html, in: childNodes),
+              let body = uniqueDirectElement(named: UTF8Arrays.body, in: html.element.getChildNodes()) else {
+            return nil
+        }
+        return UniqueHTMLBody(
+            html: html.element,
+            htmlIndex: html.index,
+            body: body.element,
+            bodyIndex: body.index
+        )
+    }
+
+    private func outerHtmlUTF8PreservingSourceOutsideBody(
+        _ location: UniqueHTMLBody,
+        contents bodyContents: BodyContentsForSerialization
+    ) throws -> [UInt8] {
+        let htmlChildren = location.html.getChildNodes()
         let outputSettings = getOutputSettings()
-        let capacity = estimatedDocumentOuterHtmlCapacity() + (providedBodyBytes?.count ?? 0)
+        let replacementByteCount: Int
+        switch bodyContents {
+        case .currentTree:
+            replacementByteCount = 0
+        case .serialized(let bytes):
+            replacementByteCount = bytes.count
+        }
+        let capacity = estimatedDocumentOuterHtmlCapacity() + replacementByteCount
         let accum = StringBuilder.acquire(capacity)
         defer { StringBuilder.release(accum) }
+
         for index in childNodes.indices {
             let node = childNodes[index]
-            guard index == htmlElementIndex else {
+            guard index == location.htmlIndex else {
                 try node.outerHtmlFast(accum, 0, outputSettings, allowRawSource: true)
                 continue
             }
-            try htmlElement.outerHtmlHead(accum, 0, outputSettings)
-            for childIndex in htmlChildren.indices where childIndex < bodyElementIndex {
+
+            try location.html.outerHtmlHead(accum, 0, outputSettings)
+            for childIndex in htmlChildren.indices where childIndex < location.bodyIndex {
                 try htmlChildren[childIndex].outerHtmlFast(
                     accum,
                     1,
@@ -364,19 +406,24 @@ open class Document: Element {
                     allowRawSource: true
                 )
             }
-            try bodyElement.outerHtmlHead(accum, 1, outputSettings)
-            if let providedBodyBytes {
-                accum.append(providedBodyBytes)
-            } else if bodyChildren.count == 1,
-                      let rawBody = bodyChildren.first as? DataNode {
-                accum.append(rawBody.getWholeDataUTF8())
-            } else {
-                for child in bodyChildren {
-                    try child.outerHtmlFastCurrentTree(accum, 2, outputSettings)
+
+            try location.body.outerHtmlHead(accum, 1, outputSettings)
+            switch bodyContents {
+            case .serialized(let bytes):
+                accum.append(bytes)
+            case .currentTree:
+                let bodyChildren = location.body.getChildNodes()
+                if bodyChildren.count == 1, let rawBody = bodyChildren.first as? DataNode {
+                    accum.append(rawBody.getWholeDataUTF8())
+                } else {
+                    for child in bodyChildren {
+                        try child.outerHtmlFastCurrentTree(accum, 2, outputSettings)
+                    }
                 }
             }
-            bodyElement.outerHtmlTail(accum, 1, outputSettings)
-            for childIndex in htmlChildren.indices where childIndex > bodyElementIndex {
+            location.body.outerHtmlTail(accum, 1, outputSettings)
+
+            for childIndex in htmlChildren.indices where childIndex > location.bodyIndex {
                 try htmlChildren[childIndex].outerHtmlFast(
                     accum,
                     1,
@@ -384,7 +431,7 @@ open class Document: Element {
                     allowRawSource: true
                 )
             }
-            htmlElement.outerHtmlTail(accum, 0, outputSettings)
+            location.html.outerHtmlTail(accum, 0, outputSettings)
         }
         return Array(outputSettings.prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }

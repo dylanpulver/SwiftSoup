@@ -1218,7 +1218,7 @@ final class BenchmarkProfileTest: XCTestCase {
     private enum SerializationBenchmarkMode: String {
         case sourcePatched = "source-patched"
         case currentTree = "current-tree"
-        case bodySplice = "body-splice"
+        case currentBodyTree = "current-body-tree"
 
         func serialize(_ document: Document) throws -> [UInt8] {
             switch self {
@@ -1226,8 +1226,8 @@ final class BenchmarkProfileTest: XCTestCase {
                 return try document.outerHtmlUTF8()
             case .currentTree:
                 return try document.outerHtmlUTF8FromCurrentTree()
-            case .bodySplice:
-                return try document.outerHtmlUTF8FromCurrentTreeSplicingBody()
+            case .currentBodyTree:
+                return try document.outerHtmlUTF8FromCurrentBodyTree()
             }
         }
     }

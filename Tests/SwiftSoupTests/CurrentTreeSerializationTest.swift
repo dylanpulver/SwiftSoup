@@ -35,7 +35,7 @@ final class CurrentTreeSerializationTest: XCTestCase {
         XCTAssertEqual(try reparsed.getElementById("reader")?.text(), "Before")
     }
 
-    func testBodySpliceSerializesCurrentBodyAndPreservesSourceBackedShell() throws {
+    func testCurrentBodyTreeSerializationPreservesSourceBackedShell() throws {
         let document = try parseHTML(
             "<!doctype html><html><!--before-head--><head data-shell='source'><title>Title</title></head>" +
             "<!--before-body--><body class='reader'><main id='reader'>Before</main></body>" +
@@ -45,7 +45,7 @@ final class CurrentTreeSerializationTest: XCTestCase {
         try main.text("After")
         try main.attr("data-state", "complete")
 
-        let serialized = string(try document.outerHtmlUTF8FromCurrentTreeSplicingBody())
+        let serialized = string(try document.outerHtmlUTF8FromCurrentBodyTree())
         XCTAssertTrue(serialized.contains("<!--before-head-->"))
         XCTAssertTrue(serialized.contains("<!--before-body-->"))
         XCTAssertTrue(serialized.contains("<!--after-body-->"))
@@ -56,7 +56,7 @@ final class CurrentTreeSerializationTest: XCTestCase {
         XCTAssertEqual(try reparsed.getElementById("reader")?.attr("data-state"), "complete")
     }
 
-    func testBodySpliceAcceptsPreSerializedBodyBytes() throws {
+    func testReplacingBodyContentsAcceptsPreSerializedBytes() throws {
         let document = try parseHTML(
             "<!doctype html><html><head><title>Title</title></head>" +
             "<body class='reader'><p>Discarded</p></body></html>"
@@ -64,7 +64,7 @@ final class CurrentTreeSerializationTest: XCTestCase {
         let replacement = Array("<main id=\"replacement\">Replacement</main>".utf8)
 
         let serialized = string(
-            try document.outerHtmlUTF8FromCurrentTree(splicingBodyBytes: replacement)
+            try document.outerHtmlUTF8ReplacingBodyContents(with: replacement)
         )
         XCTAssertTrue(serialized.contains("<body class=\"reader\">"))
         XCTAssertTrue(serialized.contains(string(replacement)))
@@ -74,30 +74,38 @@ final class CurrentTreeSerializationTest: XCTestCase {
         XCTAssertEqual(try reparsed.getElementById("replacement")?.text(), "Replacement")
     }
 
-    func testBodySpliceMatchesCurrentTreeWhenPrettyPrinting() throws {
+    func testCurrentBodyTreeMatchesWholeCurrentTreeWhenPrettyPrinting() throws {
         let html = "<!doctype html><html><head><title>Title</title></head>" +
             "<body><main><p>One</p><p>Two</p></main></body></html>"
         let document = try parseHTML(html, prettyPrint: true)
         try document.body()?.addClass("reader")
 
         XCTAssertEqual(
-            try document.outerHtmlUTF8FromCurrentTreeSplicingBody(),
+            try document.outerHtmlUTF8FromCurrentBodyTree(),
             try document.outerHtmlUTF8FromCurrentTree()
         )
     }
 
-    func testBodySpliceFallsBackForNonHTMLDocument() throws {
+    func testCurrentBodyTreeFallsBackForNonHTMLDocument() throws {
         let parser = Parser.xmlParser()
         let document = try parser.parseInput("<root><body><item>Value</item></body></root>", "")
         document.outputSettings().prettyPrint(pretty: false)
 
         XCTAssertEqual(
-            try document.outerHtmlUTF8FromCurrentTreeSplicingBody(),
+            try document.outerHtmlUTF8FromCurrentBodyTree(),
             try document.outerHtmlUTF8FromCurrentTree()
         )
     }
 
-    func testBodySpliceFallsBackForAmbiguousBody() throws {
+    func testReplacingBodyContentsRejectsNonHTMLDocument() throws {
+        let document = try Parser.xmlParser().parseInput("<root><item>Value</item></root>", "")
+
+        XCTAssertThrowsError(
+            try document.outerHtmlUTF8ReplacingBodyContents(with: Array("<item>Replacement</item>".utf8))
+        )
+    }
+
+    func testCurrentBodyTreeFallsBackForAmbiguousBody() throws {
         let document = try parseHTML(
             "<!doctype html><html><head><title>Title</title></head><body><p>One</p></body></html>"
         )
@@ -105,7 +113,7 @@ final class CurrentTreeSerializationTest: XCTestCase {
         try html.appendElement("body").appendElement("p").text("Two")
 
         XCTAssertEqual(
-            try document.outerHtmlUTF8FromCurrentTreeSplicingBody(),
+            try document.outerHtmlUTF8FromCurrentBodyTree(),
             try document.outerHtmlUTF8FromCurrentTree()
         )
     }
