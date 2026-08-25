@@ -1091,7 +1091,7 @@ open class Node: Equatable, Hashable {
     }
 
     @inline(__always)
-    private func outerHtmlFast(_ accum: StringBuilder, _ depth: Int, _ out: OutputSettings, allowRawSource: Bool) throws {
+    internal func outerHtmlFast(_ accum: StringBuilder, _ depth: Int, _ out: OutputSettings, allowRawSource: Bool) throws {
         if let raw = rawSourceSlice(out, allowRawSource: allowRawSource) {
             accum.append(raw)
             return
@@ -1100,6 +1100,21 @@ open class Node: Equatable, Hashable {
         if !childNodes.isEmpty {
             for child in childNodes {
                 try child.outerHtmlFast(accum, depth + 1, out, allowRawSource: allowRawSource)
+            }
+        }
+        try outerHtmlTail(accum, depth, out)
+    }
+
+    @inline(__always)
+    internal func outerHtmlFastWithoutSourceReuse(
+        _ accum: StringBuilder,
+        _ depth: Int,
+        _ out: OutputSettings
+    ) throws {
+        try outerHtmlHead(accum, depth, out)
+        if !childNodes.isEmpty {
+            for child in childNodes {
+                try child.outerHtmlFastWithoutSourceReuse(accum, depth + 1, out)
             }
         }
         try outerHtmlTail(accum, depth, out)

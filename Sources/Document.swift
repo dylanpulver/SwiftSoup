@@ -262,6 +262,12 @@ open class Document: Element {
         return max(1024, estimated)
     }
 
+    /// Serializes this document to UTF-8 using SwiftSoup's normal source-reuse behavior.
+    ///
+    /// This is the recommended serializer for almost all callers. It automatically
+    /// preserves eligible parsed source text and rebuilds modified nodes as needed.
+    /// The source-reuse variants below are specialized performance-tuning tools for
+    /// measured dense-mutation workloads.
     @inline(__always)
     open func outerHtmlUTF8() throws -> [UInt8] {
         if let patched = try patchedOuterHtmlUTF8() {
@@ -273,6 +279,178 @@ open class Document: Element {
             try node.outerHtml(accum)
         }
         return Array(getOutputSettings().prettyPrint() ? accum.buffer.trim() : accum.buffer)
+    }
+
+    // MARK: - Advanced serialization performance tuning
+
+    /// Serializes without reusing any parsed source text.
+    ///
+    /// This is an advanced performance-tuning API. Most callers should use
+    /// ``outerHtmlUTF8()``. Disabling source reuse can be faster after dense
+    /// mutations, but is usually slower for clean or sparsely modified documents.
+    /// Benchmark your representative workload before using it.
+    ///
+    /// Because every node is serialized again, the output is normalized according
+    /// to the document's output settings instead of preserving source formatting.
+    @inline(__always)
+    open func outerHtmlUTF8WithoutSourceReuse() throws -> [UInt8] {
+        let accum = StringBuilder.acquire(estimatedDocumentOuterHtmlCapacity())
+        defer { StringBuilder.release(accum) }
+        let outputSettings = getOutputSettings()
+        for node in childNodes {
+            try node.outerHtmlFastWithoutSourceReuse(accum, 0, outputSettings)
+        }
+        return Array(outputSettings.prettyPrint() ? accum.buffer.trim() : accum.buffer)
+    }
+
+    /// Serializes the body without source reuse while allowing unchanged nodes
+    /// outside the body to reuse parsed source text.
+    ///
+    /// This is an advanced performance-tuning API for HTML documents with dense
+    /// body mutations and a mostly unchanged document shell. Most callers should
+    /// use ``outerHtmlUTF8()``. Benchmark your representative workload before
+    /// choosing this policy.
+    ///
+    /// If the document does not have exactly one top-level `html` element containing
+    /// exactly one `body` element, this safely falls back to
+    /// ``outerHtmlUTF8WithoutSourceReuse()``.
+    @inline(__always)
+    open func outerHtmlUTF8ReusingSourceOutsideBody() throws -> [UInt8] {
+        guard let body = uniqueHTMLBody() else {
+            return try outerHtmlUTF8WithoutSourceReuse()
+        }
+        return try outerHtmlUTF8ReusingSourceOutsideBody(body, contents: .serializeBodyTree)
+    }
+
+    /// Inserts already-serialized UTF-8 body contents while allowing unchanged
+    /// nodes outside the body to reuse parsed source text.
+    ///
+    /// This is a specialized performance-tuning API for callers that already have
+    /// the final body bytes. Most callers should use ``outerHtmlUTF8()`` instead.
+    /// The supplied bytes are raw inner HTML; they are not parsed or escaped. The
+    /// document must have exactly one top-level `html` element containing exactly
+    /// one `body` element.
+    @inline(__always)
+    open func outerHtmlUTF8ReusingSourceOutsideBody(
+        preSerializedBodyContents bodyInnerHTMLUTF8: [UInt8]
+    ) throws -> [UInt8] {
+        guard let body = uniqueHTMLBody() else {
+            throw Exception.Error(
+                type: .IllegalArgumentException,
+                Message: "Replacing body contents requires one unambiguous html/body structure"
+            )
+        }
+        return try outerHtmlUTF8ReusingSourceOutsideBody(body, contents: .serialized(bodyInnerHTMLUTF8))
+    }
+
+    private enum BodyContentsForSerialization {
+        case serializeBodyTree
+        case serialized([UInt8])
+    }
+
+    private struct UniqueHTMLBody {
+        let html: Element
+        let htmlIndex: Int
+        let body: Element
+        let bodyIndex: Int
+    }
+
+    private struct IndexedElement {
+        let element: Element
+        let index: Int
+    }
+
+    private func uniqueDirectElement(named tagName: [UInt8], in nodes: [Node]) -> IndexedElement? {
+        var match: IndexedElement?
+        for (index, node) in nodes.enumerated() {
+            guard let element = node as? Element,
+                  element.tagNameUTF8() == tagName else {
+                continue
+            }
+            guard match == nil else {
+                return nil
+            }
+            match = IndexedElement(element: element, index: index)
+        }
+        return match
+    }
+
+    /// Returns the single body that can be replaced without changing document
+    /// structure. Ambiguous or non-HTML documents deliberately return `nil`.
+    private func uniqueHTMLBody() -> UniqueHTMLBody? {
+        guard let html = uniqueDirectElement(named: UTF8Arrays.html, in: childNodes),
+              let body = uniqueDirectElement(named: UTF8Arrays.body, in: html.element.getChildNodes()) else {
+            return nil
+        }
+        return UniqueHTMLBody(
+            html: html.element,
+            htmlIndex: html.index,
+            body: body.element,
+            bodyIndex: body.index
+        )
+    }
+
+    private func outerHtmlUTF8ReusingSourceOutsideBody(
+        _ location: UniqueHTMLBody,
+        contents bodyContents: BodyContentsForSerialization
+    ) throws -> [UInt8] {
+        let htmlChildren = location.html.getChildNodes()
+        let outputSettings = getOutputSettings()
+        let replacementByteCount: Int
+        switch bodyContents {
+        case .serializeBodyTree:
+            replacementByteCount = 0
+        case .serialized(let bytes):
+            replacementByteCount = bytes.count
+        }
+        let capacity = estimatedDocumentOuterHtmlCapacity() + replacementByteCount
+        let accum = StringBuilder.acquire(capacity)
+        defer { StringBuilder.release(accum) }
+
+        for index in childNodes.indices {
+            let node = childNodes[index]
+            guard index == location.htmlIndex else {
+                try node.outerHtmlFast(accum, 0, outputSettings, allowRawSource: true)
+                continue
+            }
+
+            try location.html.outerHtmlHead(accum, 0, outputSettings)
+            for childIndex in htmlChildren.indices where childIndex < location.bodyIndex {
+                try htmlChildren[childIndex].outerHtmlFast(
+                    accum,
+                    1,
+                    outputSettings,
+                    allowRawSource: true
+                )
+            }
+
+            try location.body.outerHtmlHead(accum, 1, outputSettings)
+            switch bodyContents {
+            case .serialized(let bytes):
+                accum.append(bytes)
+            case .serializeBodyTree:
+                let bodyChildren = location.body.getChildNodes()
+                if bodyChildren.count == 1, let rawBody = bodyChildren.first as? DataNode {
+                    accum.append(rawBody.getWholeDataUTF8())
+                } else {
+                    for child in bodyChildren {
+                        try child.outerHtmlFastWithoutSourceReuse(accum, 2, outputSettings)
+                    }
+                }
+            }
+            location.body.outerHtmlTail(accum, 1, outputSettings)
+
+            for childIndex in htmlChildren.indices where childIndex > location.bodyIndex {
+                try htmlChildren[childIndex].outerHtmlFast(
+                    accum,
+                    1,
+                    outputSettings,
+                    allowRawSource: true
+                )
+            }
+            location.html.outerHtmlTail(accum, 0, outputSettings)
+        }
+        return Array(outputSettings.prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
 
     /**
