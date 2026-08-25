@@ -447,6 +447,10 @@ open class Document: Element {
     @usableFromInline
     internal func sourcePatches() throws -> [SourcePatch] {
         guard sourceBuffer != nil else { return [] }
+        let roots = currentDirtySourceRoots()
+        guard !roots.isEmpty || sourceRangeDirty else {
+            return []
+        }
         let out = (_outputSettings.copy() as! OutputSettings).prettyPrint(pretty: false)
         var patches: [SourcePatch] = []
 
@@ -472,7 +476,6 @@ open class Document: Element {
             }
         }
 
-        let roots = currentDirtySourceRoots()
         if roots.isEmpty {
             collect(self, false)
         } else {
