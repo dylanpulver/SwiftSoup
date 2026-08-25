@@ -1215,7 +1215,28 @@ final class BenchmarkProfileTest: XCTestCase {
         func tail(_ node: Node, _ depth: Int) {}
     }
 
-    private func exerciseManabiReaderOps(_ doc: Document) throws {
+    private enum SerializationBenchmarkMode: String {
+        case sourcePatched = "source-patched"
+        case currentTree = "current-tree"
+        case bodySplice = "body-splice"
+
+        func serialize(_ document: Document) throws -> [UInt8] {
+            switch self {
+            case .sourcePatched:
+                return try document.outerHtmlUTF8()
+            case .currentTree:
+                return try document.outerHtmlUTF8FromCurrentTree()
+            case .bodySplice:
+                return try document.outerHtmlUTF8FromCurrentTreeSplicingBody()
+            }
+        }
+    }
+
+    private func exerciseManabiReaderOps(
+        _ doc: Document,
+        serializationMode: SerializationBenchmarkMode,
+        denseBodyMutations: Bool
+    ) throws {
         if let head = doc.head() {
             try head.append("<style type='text/css' id='manabi-readability-styles'>.x{}</style>")
         }
@@ -1240,6 +1261,9 @@ final class BenchmarkProfileTest: XCTestCase {
             for segment in segments {
                 _ = segment.dataset()["jmdict-entry-ids"]
                 _ = segment.dataset()["jmnedict-entry-ids"]
+                if denseBodyMutations {
+                    try segment.attr("data-reader-state", "processed")
+                }
             }
 
             let insertAfter = try content.getElementsByClass("manabi-tracking-section").last() ?? content
@@ -1255,7 +1279,7 @@ final class BenchmarkProfileTest: XCTestCase {
         try body.traverse(extractor)
         _ = accum.toString()
 
-        _ = try doc.outerHtmlUTF8()
+        _ = try serializationMode.serialize(doc)
     }
 
     func testParseBenchmarkProfile() throws {
@@ -1615,6 +1639,20 @@ final class BenchmarkProfileTest: XCTestCase {
         let skipSelectors = ProcessInfo.processInfo.environment["SWIFTSOUP_BENCHMARK_SKIP_SELECTORS"] == "1"
         let skipText = ProcessInfo.processInfo.environment["SWIFTSOUP_BENCHMARK_SKIP_TEXT"] == "1"
         let manabiReaderEnabled = includeBenchmark("manabi-reader")
+        let serializationModeName = ProcessInfo.processInfo.environment[
+            "SWIFTSOUP_BENCHMARK_SERIALIZER"
+        ] ?? SerializationBenchmarkMode.sourcePatched.rawValue
+        let denseBodyMutations = ProcessInfo.processInfo.environment[
+            "SWIFTSOUP_BENCHMARK_DENSE_BODY_MUTATIONS"
+        ] == "1"
+        guard let serializationMode = SerializationBenchmarkMode(rawValue: serializationModeName) else {
+            XCTFail("Unknown SWIFTSOUP_BENCHMARK_SERIALIZER value: \(serializationModeName)")
+            return
+        }
+        if manabiReaderEnabled {
+            print("Benchmark serializer: \(serializationMode.rawValue)")
+            print("Benchmark dense body mutations: \(denseBodyMutations)")
+        }
         let parser: Parser? = {
             if useFastParse {
                 let parser = Parser.htmlParser()
@@ -1655,7 +1693,11 @@ final class BenchmarkProfileTest: XCTestCase {
                     }
                 }
                 if manabiReaderEnabled {
-                    try exerciseManabiReaderOps(doc)
+                    try exerciseManabiReaderOps(
+                        doc,
+                        serializationMode: serializationMode,
+                        denseBodyMutations: denseBodyMutations
+                    )
                 }
                 if !skipText {
                     _ = try doc.text()
@@ -1688,7 +1730,11 @@ final class BenchmarkProfileTest: XCTestCase {
                     }
                 }
                 if manabiReaderEnabled {
-                    try exerciseManabiReaderOps(doc)
+                    try exerciseManabiReaderOps(
+                        doc,
+                        serializationMode: serializationMode,
+                        denseBodyMutations: denseBodyMutations
+                    )
                 }
                 if !skipText {
                     _ = try doc.text()
@@ -1732,7 +1778,11 @@ final class BenchmarkProfileTest: XCTestCase {
                             }
                         }
                         if manabiReaderEnabled {
-                            try exerciseManabiReaderOps(doc)
+                            try exerciseManabiReaderOps(
+                                doc,
+                                serializationMode: serializationMode,
+                                denseBodyMutations: denseBodyMutations
+                            )
                         }
                         if !skipText {
                             _ = try doc.text()
@@ -1765,7 +1815,11 @@ final class BenchmarkProfileTest: XCTestCase {
                             }
                         }
                         if manabiReaderEnabled {
-                            try exerciseManabiReaderOps(doc)
+                            try exerciseManabiReaderOps(
+                                doc,
+                                serializationMode: serializationMode,
+                                denseBodyMutations: denseBodyMutations
+                            )
                         }
                         if !skipText {
                             _ = try doc.text()

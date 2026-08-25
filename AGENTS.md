@@ -21,6 +21,8 @@ environment variables and runs in a release test build.
 - `SWIFTSOUP_BENCHMARK_SELECTOR_REPEAT=1`
 - `SWIFTSOUP_BENCHMARK_SELECTOR_STRESS_REPEAT=1`
 - `SWIFTSOUP_BENCHMARK_ATTRIBUTE_SELECTOR_STRESS_REPEAT=1`
+- `SWIFTSOUP_BENCHMARK_SERIALIZER=source-patched|current-tree|body-splice`
+- `SWIFTSOUP_BENCHMARK_DENSE_BODY_MUTATIONS=1`
 
 ## Regression suite (broad coverage)
 Run in both baseline and current (exact command line):
@@ -50,6 +52,24 @@ SWIFTSOUP_BENCHMARK_SELECTOR_REPEAT=1 \
 SWIFTSOUP_BENCHMARK_SELECTOR_STRESS_REPEAT=1 \
 SWIFTSOUP_BENCHMARK_ATTRIBUTE_SELECTOR_STRESS_REPEAT=1 \
 swift test -c release --filter BenchmarkProfileTest/testParseBenchmarkProfile
+```
+
+## Serializer A/B
+For Reader-style dense body mutation, run the same release benchmark once per serializer:
+```
+for serializer in source-patched current-tree body-splice; do
+  SWIFTSOUP_BENCHMARK=1 \
+  SWIFTSOUP_BENCHMARK_SET=manabi-reader \
+  SWIFTSOUP_BENCHMARK_MANABI_REPEAT=40 \
+  SWIFTSOUP_BENCHMARK_WARMUP=2 \
+  SWIFTSOUP_BENCHMARK_ITERATIONS=30 \
+  SWIFTSOUP_BENCHMARK_ITERATIONS_MULTIPLIER=1 \
+  SWIFTSOUP_BENCHMARK_SKIP_SELECTORS=1 \
+  SWIFTSOUP_BENCHMARK_SKIP_TEXT=1 \
+  SWIFTSOUP_BENCHMARK_DENSE_BODY_MUTATIONS=1 \
+  SWIFTSOUP_BENCHMARK_SERIALIZER="$serializer" \
+  swift test -c release --filter BenchmarkProfileTest/testParseBenchmarkProfile
+done
 ```
 
 ## Baseline worktree helper

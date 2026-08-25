@@ -278,25 +278,38 @@ open class Document: Element {
         return Array(getOutputSettings().prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
 
+    /// Serializes the DOM as it exists now without reusing source-backed node slices.
+    ///
+    /// This can outperform source patching after dense mutations and produces a
+    /// normalized representation of the current tree. For clean or sparsely
+    /// modified documents, prefer ``outerHtmlUTF8()``.
     @inline(__always)
     open func outerHtmlUTF8FromCurrentTree() throws -> [UInt8] {
-        var bytes = [UInt8]()
-        bytes.reserveCapacity(estimatedDocumentOuterHtmlCapacity())
+        let accum = StringBuilder.acquire(estimatedDocumentOuterHtmlCapacity())
+        defer { StringBuilder.release(accum) }
         let outputSettings = getOutputSettings()
         for node in childNodes {
-            bytes.append(contentsOf: try node.outerHtmlUTF8Internal(outputSettings, allowRawSource: false))
+            try node.outerHtmlFastCurrentTree(accum, 0, outputSettings)
         }
-        if outputSettings.prettyPrint() {
-            return Array(bytes.trim())
-        }
-        return bytes
+        return Array(outputSettings.prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
 
+    /// Serializes the current body while allowing unchanged nodes outside it
+    /// to reuse their source slices.
+    ///
+    /// This is intended for HTML workloads that densely mutate the body but
+    /// leave the surrounding document shell mostly unchanged.
     @inline(__always)
     open func outerHtmlUTF8FromCurrentTreeSplicingBody() throws -> [UInt8] {
         try outerHtmlUTF8FromCurrentTree(splicingBodyBytes: nil)
     }
 
+    /// Serializes the document shell and inserts either the current body tree
+    /// or the supplied already-serialized body contents.
+    ///
+    /// The supplied bytes are treated as raw inner HTML and are not parsed or
+    /// escaped. Documents without one unambiguous `html` and `body` element
+    /// fall back to ``outerHtmlUTF8FromCurrentTree()``.
     @inline(__always)
     open func outerHtmlUTF8FromCurrentTree(splicingBodyBytes providedBodyBytes: [UInt8]?) throws -> [UInt8] {
         var htmlElementIndex: Int?
@@ -330,55 +343,50 @@ open class Document: Element {
               let bodyElement = htmlChildren[bodyElementIndex] as? Element else {
             return try outerHtmlUTF8FromCurrentTree()
         }
-
-        let bodyBytes: [UInt8]
-        if let providedBodyBytes {
-            bodyBytes = providedBodyBytes
-        } else if bodyElement.getChildNodes().count == 1,
-                  let rawBody = bodyElement.getChildNodes().first as? DataNode {
-            bodyBytes = rawBody.getWholeDataUTF8()
-        } else {
-            bodyBytes = try bodyElement.htmlUTF8FromCurrentTree()
-        }
+        let bodyChildren = bodyElement.getChildNodes()
 
         let outputSettings = getOutputSettings()
-        func renderedBytes(_ render: (StringBuilder) throws -> Void) rethrows -> [UInt8] {
-            let accum = StringBuilder.acquire(512)
-            defer { StringBuilder.release(accum) }
-            try render(accum)
-            return Array(accum.buffer)
-        }
-
-        var bytes = [UInt8]()
-        bytes.reserveCapacity(estimatedDocumentOuterHtmlCapacity() + bodyBytes.count)
+        let capacity = estimatedDocumentOuterHtmlCapacity() + (providedBodyBytes?.count ?? 0)
+        let accum = StringBuilder.acquire(capacity)
+        defer { StringBuilder.release(accum) }
         for index in childNodes.indices {
             let node = childNodes[index]
             guard index == htmlElementIndex else {
-                bytes.append(contentsOf: try renderedBytes {
-                    try node.outerHtmlFast($0, 0, outputSettings, allowRawSource: true)
-                })
+                try node.outerHtmlFast(accum, 0, outputSettings, allowRawSource: true)
                 continue
             }
-            bytes.append(contentsOf: try renderedBytes {
-                try htmlElement.outerHtmlHead($0, 0, outputSettings)
-                for childIndex in htmlChildren.indices where childIndex < bodyElementIndex {
-                    try htmlChildren[childIndex].outerHtmlFast($0, 1, outputSettings, allowRawSource: true)
+            try htmlElement.outerHtmlHead(accum, 0, outputSettings)
+            for childIndex in htmlChildren.indices where childIndex < bodyElementIndex {
+                try htmlChildren[childIndex].outerHtmlFast(
+                    accum,
+                    1,
+                    outputSettings,
+                    allowRawSource: true
+                )
+            }
+            try bodyElement.outerHtmlHead(accum, 1, outputSettings)
+            if let providedBodyBytes {
+                accum.append(providedBodyBytes)
+            } else if bodyChildren.count == 1,
+                      let rawBody = bodyChildren.first as? DataNode {
+                accum.append(rawBody.getWholeDataUTF8())
+            } else {
+                for child in bodyChildren {
+                    try child.outerHtmlFastCurrentTree(accum, 2, outputSettings)
                 }
-                try bodyElement.outerHtmlHead($0, 1, outputSettings)
-            })
-            bytes.append(contentsOf: bodyBytes)
-            bytes.append(contentsOf: try renderedBytes {
-                try bodyElement.outerHtmlTail($0, 1, outputSettings)
-                for childIndex in htmlChildren.indices where childIndex > bodyElementIndex {
-                    try htmlChildren[childIndex].outerHtmlFast($0, 1, outputSettings, allowRawSource: true)
-                }
-                try htmlElement.outerHtmlTail($0, 0, outputSettings)
-            })
+            }
+            bodyElement.outerHtmlTail(accum, 1, outputSettings)
+            for childIndex in htmlChildren.indices where childIndex > bodyElementIndex {
+                try htmlChildren[childIndex].outerHtmlFast(
+                    accum,
+                    1,
+                    outputSettings,
+                    allowRawSource: true
+                )
+            }
+            htmlElement.outerHtmlTail(accum, 0, outputSettings)
         }
-        if outputSettings.prettyPrint() {
-            return bytes.trim()
-        }
-        return bytes
+        return Array(outputSettings.prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
 
     /**

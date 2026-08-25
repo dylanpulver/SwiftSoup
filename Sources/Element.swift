@@ -2751,18 +2751,16 @@ open class Element: Node {
         return Array(getOutputSettings().prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
 
+    /// Serializes this element's current children without reusing source-backed slices.
     @inline(__always)
     public func htmlUTF8FromCurrentTree() throws -> [UInt8] {
-        var bytes = [UInt8]()
-        bytes.reserveCapacity(estimatedOuterHtmlCapacity())
+        let accum = StringBuilder.acquire(estimatedOuterHtmlCapacity())
+        defer { StringBuilder.release(accum) }
         let outputSettings = getOutputSettings()
         for node in childNodes {
-            bytes.append(contentsOf: try node.outerHtmlUTF8Internal(outputSettings, allowRawSource: false))
+            try node.outerHtmlFastCurrentTree(accum, 0, outputSettings)
         }
-        if outputSettings.prettyPrint() {
-            return bytes.trim()
-        }
-        return bytes
+        return Array(outputSettings.prettyPrint() ? accum.buffer.trim() : accum.buffer)
     }
     
     @inline(__always)
