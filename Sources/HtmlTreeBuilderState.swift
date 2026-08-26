@@ -1193,6 +1193,10 @@ enum HtmlTreeBuilderState: String, HtmlTreeBuilderStateProtocol {
                             return false
                         } else {
                             // todo: error if stack contains something not dd, dt, li, optgroup, option, p, rp, rt, tbody, td, tfoot, th, thead, tr, body, html
+                            tb.completeSourceRangeForOpenElement(
+                                UTF8Arrays.body,
+                                endingAt: endTag
+                            )
                             tb.transition(.AfterBody)
                         }
                         return true
@@ -1322,6 +1326,10 @@ enum HtmlTreeBuilderState: String, HtmlTreeBuilderStateProtocol {
                                 return false
                             } else {
                                 // todo: error if stack contains something not dd, dt, li, optgroup, option, p, rp, rt, tbody, td, tfoot, th, thead, tr, body, html
+                                tb.completeSourceRangeForOpenElement(
+                                    UTF8Arrays.body,
+                                    endingAt: endTag
+                                )
                                 tb.transition(.AfterBody)
                             }
                         } else if name == UTF8Arrays.html {
@@ -2333,6 +2341,10 @@ enum HtmlTreeBuilderState: String, HtmlTreeBuilderStateProtocol {
                     tb.error(self)
                     return false
                 } else {
+                    tb.completeSourceRangeForOpenElement(
+                        UTF8Arrays.html,
+                        endingAt: t.asEndTag()
+                    )
                     tb.transition(.AfterAfterBody)
                 }
             } else if (t.isEOF()) {

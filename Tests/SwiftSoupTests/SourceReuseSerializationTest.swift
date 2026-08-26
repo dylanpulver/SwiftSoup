@@ -35,6 +35,21 @@ final class SourceReuseSerializationTest: XCTestCase {
         XCTAssertEqual(try reparsed.getElementById("reader")?.text(), "Before")
     }
 
+    func testNormalSerializationPreservesBodyAndHTMLAttributeMutations() throws {
+        let document = try parseHTML(
+            "<html lang='ja'><head><title>Test</title></head>" +
+            "<body class='reader'><main id='reader'>Before</main></body></html>"
+        )
+        let html = try XCTUnwrap(document.getElementsByTag("html").first())
+        let body = try XCTUnwrap(document.body())
+        try html.attr("data-document-state", "processed")
+        try body.attr("data-processing-state", "complete")
+
+        let reparsed = try SwiftSoup.parse(string(try document.outerHtmlUTF8()))
+        XCTAssertEqual(try reparsed.getElementsByTag("html").first()?.attr("data-document-state"), "processed")
+        XCTAssertEqual(try reparsed.body()?.attr("data-processing-state"), "complete")
+    }
+
     func testReusingSourceOutsideBodyPreservesSourceBackedShell() throws {
         let document = try parseHTML(
             "<!doctype html><html><!--before-head--><head data-shell='source'><title>Title</title></head>" +
@@ -42,6 +57,8 @@ final class SourceReuseSerializationTest: XCTestCase {
             "<!--after-body--></html>"
         )
         let main = try XCTUnwrap(document.getElementById("reader"))
+        let body = try XCTUnwrap(document.body())
+        try body.attr("data-processing-state", "complete")
         try main.text("After")
         try main.attr("data-state", "complete")
 
@@ -52,6 +69,7 @@ final class SourceReuseSerializationTest: XCTestCase {
 
         let reparsed = try SwiftSoup.parse(serialized)
         XCTAssertEqual(try reparsed.head()?.attr("data-shell"), "source")
+        XCTAssertEqual(try reparsed.body()?.attr("data-processing-state"), "complete")
         XCTAssertEqual(try reparsed.getElementById("reader")?.text(), "After")
         XCTAssertEqual(try reparsed.getElementById("reader")?.attr("data-state"), "complete")
     }
