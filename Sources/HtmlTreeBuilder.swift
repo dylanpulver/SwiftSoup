@@ -753,6 +753,22 @@ class HtmlTreeBuilder: TreeBuilder {
         return stack[index]
     }
 
+    /// Records the explicit closing tag for an element that remains on the HTML
+    /// parser stack. `body` and `html` transition the insertion mode without
+    /// being popped, so the normal pop bookkeeping cannot complete their ranges.
+    @inline(__always)
+    func completeSourceRangeForOpenElement(
+        _ elementName: [UInt8],
+        endingAt endTag: Token.EndTag
+    ) {
+        guard tracksSourceRanges,
+              let endRange = endTag.sourceRange,
+              let element = getFromStack(elementName) else {
+            return
+        }
+        element.setSourceRangeEnd(endRange.end)
+    }
+
     
     @inlinable
     func getFromStack(_ elName: String) -> Element? {
