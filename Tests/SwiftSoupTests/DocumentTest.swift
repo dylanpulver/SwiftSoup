@@ -563,4 +563,20 @@ class DocumentTest: XCTestCase {
 		}
 	}
 
+    func testCompactUTF8PreservesFragmentInsertionsAndRemovals() throws {
+        let doc = try SwiftSoup.parse("<p>Before</p>")
+        doc.outputSettings().prettyPrint(pretty: false)
+        try doc.body()?.appendElement("p").text("After")
+        let appended = String(decoding: try doc.outerHtmlUTF8(), as: UTF8.self)
+        XCTAssertEqual(try SwiftSoup.parse(appended).select("p").array().map { try $0.text() }, ["Before", "After"])
+        try doc.select("p").remove()
+        XCTAssertTrue(try SwiftSoup.parse(String(decoding: doc.outerHtmlUTF8(), as: UTF8.self)).select("p").isEmpty)
+    }
+
+    func testCompactUTF8HonorsXMLSyntax() throws {
+        let doc = try SwiftSoup.parse("<html><head></head><body><br><input disabled></body></html>")
+        doc.outputSettings().prettyPrint(pretty: false).syntax(syntax: .xml)
+        XCTAssertEqual(try doc.outerHtmlUTF8(), try doc.outerHtmlUTF8WithoutSourceReuse())
+    }
+
 }
