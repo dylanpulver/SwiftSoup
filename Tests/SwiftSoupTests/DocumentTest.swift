@@ -579,4 +579,10 @@ class DocumentTest: XCTestCase {
         XCTAssertEqual(try doc.outerHtmlUTF8(), try doc.outerHtmlUTF8WithoutSourceReuse())
     }
 
+    func testCompactUTF8HonorsHTMLSyntaxForXMLParse() throws {
+        let doc = try SwiftSoup.parse("<html><head/><body><br/></body></html>", "", Parser.xmlParser())
+        doc.outputSettings().prettyPrint(pretty: false).syntax(syntax: .html)
+        XCTAssertEqual(try doc.outerHtmlUTF8(), try doc.outerHtmlUTF8WithoutSourceReuse())
+    }
+
 }

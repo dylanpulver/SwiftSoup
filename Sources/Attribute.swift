@@ -35,6 +35,30 @@ open class Attribute {
     var lowerValueSliceCache: ByteSlice? = nil
     @usableFromInline
     var lowerTrimmedValueSliceCache: ByteSlice? = nil
+
+    // Attributes may be shared by put(attribute:), addAll, and collection copies.
+    // Keep every containing collection informed without retaining the DOM.
+    private weak var mutationOwner: Attributes?
+    private var additionalMutationOwners: [Weak<Attributes>] = []
+
+    internal func registerMutationOwner(_ owner: Attributes) {
+        if mutationOwner === owner { return }
+        additionalMutationOwners.removeAll { $0.value == nil }
+        if additionalMutationOwners.contains(where: { $0.value === owner }) { return }
+        if mutationOwner == nil {
+            mutationOwner = owner
+        } else {
+            additionalMutationOwners.append(Weak(owner))
+        }
+    }
+
+    private func notifyMutationOwners() {
+        mutationOwner?.attributeDidMutate(self)
+        additionalMutationOwners.removeAll { $0.value == nil }
+        for owner in additionalMutationOwners {
+            owner.value?.attributeDidMutate(self)
+        }
+    }
     
     public init(key: [UInt8], value: [UInt8]) throws {
         try Validate.notEmpty(string: key)
@@ -89,6 +113,7 @@ open class Attribute {
         keySlice = ByteSlice.fromArray(key).trim()
         keyBytes = nil
         lowerKeySliceCache = nil
+        notifyMutationOwners()
     }
     
     @inline(__always)
@@ -141,6 +166,7 @@ open class Attribute {
         valueBytes = nil
         lowerValueSliceCache = nil
         lowerTrimmedValueSliceCache = nil
+        notifyMutationOwners()
         return old
     }
     

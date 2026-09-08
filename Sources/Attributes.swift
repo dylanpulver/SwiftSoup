@@ -104,6 +104,19 @@ open class Attributes: NSCopying {
         attributes.reserveCapacity(16)
     }
 
+    internal func attributeDidMutate(_ attribute: Attribute) {
+        // Removed/replaced references may outlive their former collection.
+        guard attributes.contains(where: { $0 === attribute }) else { return }
+        hasUppercaseKeys = attributes.contains { Self.containsAsciiUppercase($0.keySlice) }
+        invalidateLowercasedKeysCache()
+        invalidateKeyIndex()
+        ownerElement?.markClassQueryIndexDirty()
+        ownerElement?.markIdQueryIndexDirty()
+        ownerElement?.markAttributeQueryIndexDirty()
+        ownerElement?.markAttributeValueQueryIndexDirty()
+        ownerElement?.markSourceDirty()
+    }
+
     /// Materializes a deferred attribute, throwing if the key fails validation (e.g. an
     /// empty-after-trim key). Callers invoke this via `try?` and drop anything that fails,
     /// matching jsoup — never trapping. See #392.
@@ -214,6 +227,7 @@ open class Attributes: NSCopying {
             // trapping; jsoup does the same. This is the path #392 hits via
             // getIgnoreCase during select()'s query-index rebuild.
             guard let attribute = try? makeMaterializedAttribute(keySlice: keySlice, value: pendingAttr.value) else { continue }
+            attribute.registerMutationOwner(self)
             let keyForIndex = attribute.keySlice
             if Attributes.containsAsciiUppercase(keyForIndex) {
                 hasUppercaseKeys = true
@@ -259,6 +273,7 @@ open class Attributes: NSCopying {
 
     @inline(__always)
     internal func putMaterialized(_ attribute: Attribute) {
+        attribute.registerMutationOwner(self)
         let keySlice = attribute.keySlice
         let hasUppercase = Attributes.containsAsciiUppercase(keySlice)
         let normalizedKey = hasUppercase ? attribute.lowerKeySlice() : keySlice
@@ -1284,6 +1299,9 @@ open class Attributes: NSCopying {
         ensureMaterialized()
         let clone = Attributes()
         clone.attributes = attributes
+        for attribute in clone.attributes {
+            attribute.registerMutationOwner(clone)
+        }
         clone.hasUppercaseKeys = hasUppercaseKeys
         clone.lowercasedKeysCache = nil
         clone.lowercasedKeyIndex = nil

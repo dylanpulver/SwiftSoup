@@ -67,4 +67,33 @@ final class StackOverflow393Test: XCTestCase {
         }
         XCTAssertTrue(ok, "deep Element.empty() overflowed the small-stack thread")
     }
+    func testDeepSerializationOnSmallStackPreservesCleanAndMutatedTrees() {
+        let depth = 3_000
+        let html = "<html><head></head><body>" + String(repeating: "<span>", count: depth)
+            + "original" + String(repeating: "</span>", count: depth) + "</body></html>"
+        let ok = runOnSmallStack(stackSize: 512 * 1024) {
+            do {
+                let document = try SwiftSoup.parse(html)
+                document.outputSettings().prettyPrint(pretty: true).indentAmount(indentAmount: 0)
+                let pretty = try document.outerHtml()
+                XCTAssertEqual(try SwiftSoup.parse(pretty).body()?.text(), "original")
+
+                document.outputSettings().prettyPrint(pretty: false)
+                XCTAssertEqual(String(decoding: try document.outerHtmlUTF8(), as: UTF8.self), html)
+                var deepest: Node = try XCTUnwrap(document.body())
+                while let child = deepest.getChildNodes().first { deepest = child }
+                let text = try XCTUnwrap(deepest as? TextNode)
+                text.text("updated")
+                for bytes in [try document.outerHtmlUTF8(), try document.outerHtmlUTF8WithoutSourceReuse()] {
+                    let reparsed = try SwiftSoup.parse(String(decoding: bytes, as: UTF8.self))
+                    XCTAssertEqual(try reparsed.body()?.text(), "updated")
+                    XCTAssertEqual(try reparsed.select("span").count, depth)
+                }
+            } catch {
+                XCTFail("Deep serialization failed: \(error)")
+            }
+        }
+        XCTAssertTrue(ok, "deep serialization did not finish on the worker stack")
+    }
+
 }
