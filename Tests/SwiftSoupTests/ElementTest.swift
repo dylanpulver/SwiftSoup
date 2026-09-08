@@ -1203,6 +1203,28 @@ class ElementTest: XCTestCase {
         XCTAssertTrue(try element == doc.select(element?.cssSelector() ?? "").first())
     }
 
+    // Unlike the id above, these contain no character the simple-selector fast path declines.
+    func testCssPathRoundTripsIdWithEscapedCharacters() throws {
+        for id in ["quote$body/main", "a b", "a(b)", "a'b", "a@b", "a%b"] {
+            let doc = try SwiftSoup.parse("<div id=\"\(id)\">A</div><div id=\"other\">B</div>")
+            guard let element = try doc.select("div").first() else {
+                XCTFail("no element for id \(id)")
+                continue
+            }
+            let selector = try element.cssSelector()
+            XCTAssertEqual(1, try doc.select(selector).size(), "selector \(selector)")
+            XCTAssertEqual("A", try doc.select(selector).text(), "selector \(selector)")
+        }
+    }
+
+    func testCssPathRoundTripsIdContainingBackslash() throws {
+        let doc = try SwiftSoup.parse(#"<div id="a\b">A</div><div id="ab">B</div>"#)
+        let element = try doc.select("div").first()
+
+        XCTAssertEqual(#"#a\\b"#, try element?.cssSelector())
+        XCTAssertEqual("A", try doc.select(element?.cssSelector() ?? "").text())
+    }
+
 	func testClassNames() throws {
 		let doc: Document = try SwiftSoup.parse("<div class=\"c1 c2\">C</div>")
 		let div: Element = try doc.select("div").get(0)

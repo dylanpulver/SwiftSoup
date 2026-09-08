@@ -42,6 +42,7 @@ public class TokeniserStateVars {
     @usableFromInline static let pipeByte: UInt8 = 0x7C
     @usableFromInline static let dotByte: UInt8 = 0x2E
     @usableFromInline static let leftBracketByte: UInt8 = 0x5B
+    @usableFromInline static let backslashByte: UInt8 = 0x5C
     @usableFromInline static let rightBracketByte: UInt8 = 0x5D
     @usableFromInline static let underscoreByte: UInt8 = 0x5F
     @usableFromInline static let zeroByte: UInt8 = 0x30

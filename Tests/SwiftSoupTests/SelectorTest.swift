@@ -1056,6 +1056,15 @@ class SelectorTest: XCTestCase {
 		XCTAssertEqual("Two", try doc.select("div[data=\"[Another)]]\"").first()?.text())
 	}
 
+	// A combinator is what decides between the two match paths; both must agree.
+	func testEscapedIdSelectorIsIndependentOfCombinators() throws {
+		let doc = try SwiftSoup.parse("<div><p id='x$y'>t</p></div>")
+		XCTAssertEqual(1, try doc.select(#"#x\$y"#).size())
+		XCTAssertEqual(1, try doc.select(#"body #x\$y"#).size())
+		XCTAssertEqual(1, try doc.select(#"div > #x\$y"#).size())
+		XCTAssertEqual(1, try doc.select(#"p#x\$y"#).size())
+	}
+
 	// Verify compound attribute selectors work on simple HTML
 	func testCompoundAttributeSelectorSimple() throws {
 		let html = "<div id='info-id' data-type='info-data'><p>Hello</p></div>"

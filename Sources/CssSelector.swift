@@ -828,7 +828,9 @@ open class CssSelector {
                      TokeniserStateVars.colonByte,
                      TokeniserStateVars.dotByte,
                      TokeniserStateVars.leftBracketByte,
-                     TokeniserStateVars.hashByte:
+                     TokeniserStateVars.hashByte,
+                     // Escapes are decoded by TokenQueue.consumeCssIdentifier, not here.
+                     TokeniserStateVars.backslashByte:
                     return .none
                 default:
                     break
